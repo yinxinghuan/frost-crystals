@@ -209,25 +209,27 @@
       [255, 230, 200], // warm gold
     ];
 
+    function pickTint() {
+      return SEED_TINTS[(Math.random() * SEED_TINTS.length) | 0];
+    }
     function newSeed(x, y, ownerPointerId) {
-      const tint = SEED_TINTS[(Math.random() * SEED_TINTS.length) | 0];
+      const tint = pickTint();
       const seed = {
         cx: x, cy: y,
         owner: ownerPointerId, // null if it's a no-owner ambient seed
-        tint,
         born: performance.now(),
-        // Single canonical branch direction we'll iterate; the 6-fold rotation
-        // is applied at render time so the seed is always symmetric.
-        // Start with three tip directions: straight ahead + ±30° splits
+        // Tint moved from seed → tip so each new wave can pick a fresh color
+        // while the same flake continues to grow.
         tips: [
-          { x: 0, y: 0, dir: Math.random() * 0.6 - 0.3, len: 0, life: 1.0 },
+          { x: 0, y: 0, dir: Math.random() * 0.6 - 0.3, len: 0, life: 1.0, tint },
         ],
         age: 0,
         active: true,
+        waveClock: 0,   // sec since last fresh-wave injection
+        holdSecs: 0,    // total sec owner has been holding
       };
       seeds.push(seed);
       if (seeds.length > MAX_SEEDS) {
-        // Drop the oldest fully-locked seed; if all active, drop oldest active
         let dropIdx = 0;
         for (let i = 1; i < seeds.length - 1; i++) {
           if (!seeds[i].active && seeds[dropIdx].active) { dropIdx = i; break; }
@@ -490,32 +492,33 @@
     // splits into two tips (current direction ±BRANCH_ANG). Old tips have
     // `life` that decays once owner releases; when life <= 0 the tip is dead.
     const SEGLEN   = 4.2;
-    const BRANCH_P = 0.06;
     const BRANCH_ANG = Math.PI / 5;
-    const MAX_TIPS_PER_SEED = 28;
-    const MAX_REACH = 360; // px from seed center — keep flakes screen-sized
+    const MAX_TIPS_PER_SEED = 56;
+    const MAX_REACH = 420;
+    // Branch probability falls off with distance — fat cluster near center, lean
+    // arms reaching out. Tuned conservative since waves keep adding new tips.
+    function branchP(len) {
+      const t = Math.min(1, len / MAX_REACH);
+      return 0.09 * (1 - t * 0.85);
+    }
 
     function tipGuide(seed, tip, fingerWorld) {
-      // If finger present + owner matches: bias growth toward the finger
-      // direction (in the seed's local frame, projected to its 6-fold "wedge"
-      // by always working in (r, theta) space relative to the seed center).
-      // For simplicity, snap finger angle into the [-30°, 30°] wedge so growth
-      // stays inside the symmetry triangle.
-      if (!fingerWorld) {
-        // Wander
-        return tip.dir + (Math.random() - 0.5) * 0.12;
+      // Only tips near the seed center are steered by the finger — past ~80px,
+      // tips fly free in their own direction (branches especially). This keeps
+      // branches divergent like a real snowflake's secondary spokes instead of
+      // all collapsing back onto the same primary axis.
+      const wander = (Math.random() - 0.5) * 0.10;
+      if (!fingerWorld || tip.len > 80) {
+        return tip.dir + wander;
       }
       const fx = fingerWorld.x - seed.cx;
       const fy = fingerWorld.y - seed.cy;
-      // Tip in world coords (local rotated through some symmetry copy doesn't
-      // matter — finger steers the canonical branch). Use polar wedge:
       const ang = Math.atan2(fy, fx);
-      // Wrap to nearest -PI/6..PI/6 window by mapping mod 60°
-      let wedge = ang;
-      // Shift so wedge centers are at i*60° → bring to (-30°, 30°)
-      wedge = ((wedge + Math.PI / 6) % (Math.PI / 3) + Math.PI / 3) % (Math.PI / 3) - Math.PI / 6;
-      // Mix wedge target with current dir for smooth steering
-      return tip.dir * 0.55 + wedge * 0.45 + (Math.random() - 0.5) * 0.08;
+      let wedge = ((ang + Math.PI / 6) % (Math.PI / 3) + Math.PI / 3) % (Math.PI / 3) - Math.PI / 6;
+      // Steering strength fades with distance — fully steered at center, half
+      // by 60px, free by 80px
+      const k = 1 - tip.len / 80;
+      return tip.dir * (1 - k * 0.45) + wedge * (k * 0.45) + wander;
     }
 
     function stepSeed(seed, now, dtSec) {
@@ -524,20 +527,45 @@
         ? (seed.owner === -1 ? (demo.active ? demo : null) : fingers.get(seed.owner))
         : null;
       const fingerWorld = ownerFinger ? { x: ownerFinger.x, y: ownerFinger.y } : null;
-      // Growth speed — faster when owner is active
       const growBudget = ownerFinger ? 1.0 : 0.0;
+
       // Tip life decay once owner released
       if (!ownerFinger && seed.releasedAt) {
         const elapsed = (now - seed.releasedAt) / 1000;
         const fade = Math.max(0, 1 - elapsed / 1.1);
         for (const tip of seed.tips) tip.life = Math.min(tip.life, fade);
       }
+
+      // While held, periodically inject a NEW wave of tips from the seed center
+      // — each wave picks a fresh tint so the flake keeps changing color and
+      // growing fresh branches even after the first set has reached MAX_REACH.
+      if (ownerFinger) {
+        seed.holdSecs += dtSec;
+        seed.waveClock += dtSec;
+        const room = MAX_TIPS_PER_SEED - seed.tips.length;
+        if (seed.waveClock >= 0.9 && room >= 4) {
+          seed.waveClock = 0;
+          const tint = pickTint();
+          const baseDir = (Math.random() - 0.5) * 0.8;
+          const numNew = 1 + (Math.random() < 0.45 ? 1 : 0);
+          for (let i = 0; i < numNew; i++) {
+            seed.tips.push({
+              x: 0, y: 0,
+              dir: baseDir + (Math.random() - 0.5) * 0.4,
+              len: 0, life: 1.0, tint,
+            });
+          }
+          if (audioReady()) playTinkle(0.85, 0.08);
+        }
+      } else {
+        seed.waveClock = 0;
+      }
+
       // Step each tip
       const newTips = [];
       for (let i = 0; i < seed.tips.length; i++) {
         const tip = seed.tips[i];
         if (tip.life <= 0.01 || tip.len > MAX_REACH) continue;
-        // Extend
         const steerDir = tipGuide(seed, tip, fingerWorld);
         const grow = growBudget * (0.7 + 0.6 * tip.life);
         const stepN = grow > 0 ? 1 : 0;
@@ -547,28 +575,29 @@
           const dy = Math.sin(ang) * SEGLEN;
           const from = { x: tip.x, y: tip.y };
           tip.x += dx; tip.y += dy; tip.dir = ang; tip.len += SEGLEN;
-          // Record a fresh segment for drawing
           freshSegs.push({
-            seed, from, to: { x: tip.x, y: tip.y }, life: tip.life,
+            seed, from, to: { x: tip.x, y: tip.y },
+            life: tip.life, tint: tip.tint,
           });
-          // Crystalline tinkle, throttled by depth
-          if (Math.random() < 0.18) {
+          // Throttled lower with more tips alive; otherwise audio is a wall of chimes
+          if (Math.random() < 0.06) {
             const norm = Math.min(1, tip.len / MAX_REACH);
-            playTinkle(1 - norm, 0.04 + 0.06 * tip.life);
+            playTinkle(1 - norm, 0.03 + 0.05 * tip.life);
           }
-          // Branch
-          if (Math.random() < BRANCH_P && seed.tips.length + newTips.length < MAX_TIPS_PER_SEED) {
+          // Branch — inherits parent's tint so wave colors stay coherent within
+          // their lineage instead of mixing arbitrarily.
+          if (Math.random() < branchP(tip.len) && seed.tips.length + newTips.length < MAX_TIPS_PER_SEED) {
             newTips.push({
               x: tip.x, y: tip.y,
               dir: ang + (Math.random() < 0.5 ? -1 : 1) * BRANCH_ANG,
               len: tip.len,
               life: tip.life * 0.96,
+              tint: tip.tint,
             });
           }
         }
       }
       seed.tips.push(...newTips);
-      // Prune
       seed.tips = seed.tips.filter(t => t.life > 0.01 && t.len <= MAX_REACH);
       if (seed.tips.length === 0 && !ownerFinger) {
         seed.active = false;
@@ -617,18 +646,18 @@
         if (seed.active) stepSeed(seed, now, dtSec);
       }
 
-      // ─── Slow thaw: gently fade the persistent crystal layer so old work
-      // dissolves over minutes, making room for new gestures. Cheap one-pass.
+      // ─── Slow thaw: continuous fade keeps the persistent layer from saturating
+      // during long holds and naturally clears between sessions. With dense
+      // wave-driven growth, fade is brisker than v1 — halves in ~40s of hold.
       px.save();
       px.globalCompositeOperation = 'destination-in';
-      px.fillStyle = 'rgba(0,0,0,0.9994)';
+      px.fillStyle = 'rgba(0,0,0,0.9982)';
       px.fillRect(0, 0, W, H);
       px.restore();
 
       // ─── Persistent draw: ink in the fresh segments to the pane canvas ──
       for (const seg of freshSegs) {
-        const t = seg.seed.tint;
-        // Soft underglow first, then a crisp white-ish core
+        const t = seg.tint;
         drawSegMirrored(px, seg.seed, seg.from, seg.to,
           `rgba(${t[0]},${t[1]},${t[2]},${0.16 + 0.18 * seg.life})`, 4.2);
         drawSegMirrored(px, seg.seed, seg.from, seg.to,
@@ -640,24 +669,21 @@
       fxc.globalCompositeOperation = 'lighter';
       for (const seed of seeds) {
         if (!seed.active) continue;
-        const t = seed.tint;
         for (const tip of seed.tips) {
           if (tip.life <= 0.01) continue;
-          // Render the tip glow 6×2-fold for symmetry
+          const t = tip.tint;
           const lx = tip.x, ly = tip.y;
           const radius = 12 + 8 * tip.life;
           for (let i = 0; i < 6; i++) {
             const { c, s } = ROTS[i];
             const ax = lx * c - ly * s;
             const ay = lx * s + ly * c;
-            // Original side
             const gA = fxc.createRadialGradient(seed.cx + ax, seed.cy + ay, 0, seed.cx + ax, seed.cy + ay, radius);
             gA.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life})`);
             gA.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life})`);
             gA.addColorStop(1,   `rgba(${t[0]},${t[1]},${t[2]},0)`);
             fxc.fillStyle = gA;
             fxc.beginPath(); fxc.arc(seed.cx + ax, seed.cy + ay, radius, 0, Math.PI * 2); fxc.fill();
-            // Mirror side
             const gB = fxc.createRadialGradient(seed.cx + ax, seed.cy - ay, 0, seed.cx + ax, seed.cy - ay, radius);
             gB.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life})`);
             gB.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life})`);
@@ -666,8 +692,10 @@
             fxc.beginPath(); fxc.arc(seed.cx + ax, seed.cy - ay, radius, 0, Math.PI * 2); fxc.fill();
           }
         }
-        // Seed center halo while owner is active
-        if (seed.owner != null) {
+        // Seed center halo while owner is active — tint follows the most recent
+        // tip (i.e. the current wave's color), so the halo color also evolves.
+        if (seed.owner != null && seed.tips.length > 0) {
+          const t = seed.tips[seed.tips.length - 1].tint;
           const haloR = 32 + 14 * Math.sin(now * 0.005);
           const g = fxc.createRadialGradient(seed.cx, seed.cy, 0, seed.cx, seed.cy, haloR);
           g.addColorStop(0, `rgba(${t[0]},${t[1]},${t[2]},0.32)`);

@@ -646,22 +646,27 @@
         if (seed.active) stepSeed(seed, now, dtSec);
       }
 
-      // ─── Slow thaw: continuous fade keeps the persistent layer from saturating
-      // during long holds and naturally clears between sessions. With dense
-      // wave-driven growth, fade is brisker than v1 — halves in ~40s of hold.
+      // ─── Slow thaw: continuous fade keeps the persistent layer from saturating.
+      // During intro (firstTouched=false) we fade noticeably faster so the demo's
+      // ink doesn't pile up and bury the tutorial finger + hint after a few cycles.
       px.save();
       px.globalCompositeOperation = 'destination-in';
-      px.fillStyle = 'rgba(0,0,0,0.9982)';
+      px.fillStyle = firstTouched ? 'rgba(0,0,0,0.9982)' : 'rgba(0,0,0,0.992)';
       px.fillRect(0, 0, W, H);
       px.restore();
 
-      // ─── Persistent draw: ink in the fresh segments to the pane canvas ──
+      // ─── Persistent draw: ink in the fresh segments to the pane canvas.
+      // Demo segments (seed.owner === -1) draw at ~20% opacity — visible enough
+      // to read "the finger grew a flake" but not enough to saturate the canvas
+      // even after many cycles.
       for (const seg of freshSegs) {
         const t = seg.tint;
+        const isDemoSeg = seg.seed.owner === -1;
+        const a = isDemoSeg ? 0.20 : 1.0;
         drawSegMirrored(px, seg.seed, seg.from, seg.to,
-          `rgba(${t[0]},${t[1]},${t[2]},${0.16 + 0.18 * seg.life})`, 4.2);
+          `rgba(${t[0]},${t[1]},${t[2]},${(0.16 + 0.18 * seg.life) * a})`, 4.2);
         drawSegMirrored(px, seg.seed, seg.from, seg.to,
-          `rgba(255,255,255,${0.65 * seg.life})`, 1.2);
+          `rgba(255,255,255,${0.65 * seg.life * a})`, 1.2);
       }
 
       // ─── FX layer: live tip halos + finger glow ─────────────────────────
@@ -669,6 +674,10 @@
       fxc.globalCompositeOperation = 'lighter';
       for (const seed of seeds) {
         if (!seed.active) continue;
+        // Demo tip halos dimmed so the tutorial finger reads clearly + the
+        // canvas doesn't look like a string of bulbs during intro
+        const isDemoSeed = seed.owner === -1;
+        const hAlpha = isDemoSeed ? 0.35 : 1.0;
         for (const tip of seed.tips) {
           if (tip.life <= 0.01) continue;
           const t = tip.tint;
@@ -679,14 +688,14 @@
             const ax = lx * c - ly * s;
             const ay = lx * s + ly * c;
             const gA = fxc.createRadialGradient(seed.cx + ax, seed.cy + ay, 0, seed.cx + ax, seed.cy + ay, radius);
-            gA.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life})`);
-            gA.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life})`);
+            gA.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life * hAlpha})`);
+            gA.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life * hAlpha})`);
             gA.addColorStop(1,   `rgba(${t[0]},${t[1]},${t[2]},0)`);
             fxc.fillStyle = gA;
             fxc.beginPath(); fxc.arc(seed.cx + ax, seed.cy + ay, radius, 0, Math.PI * 2); fxc.fill();
             const gB = fxc.createRadialGradient(seed.cx + ax, seed.cy - ay, 0, seed.cx + ax, seed.cy - ay, radius);
-            gB.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life})`);
-            gB.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life})`);
+            gB.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life * hAlpha})`);
+            gB.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life * hAlpha})`);
             gB.addColorStop(1,   `rgba(${t[0]},${t[1]},${t[2]},0)`);
             fxc.fillStyle = gB;
             fxc.beginPath(); fxc.arc(seed.cx + ax, seed.cy - ay, radius, 0, Math.PI * 2); fxc.fill();

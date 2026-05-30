@@ -426,19 +426,22 @@
       trackVoice(500);
     }
 
+    // Number of frames remaining in the "snap-clear" window — when the user
+    // first touches, we briefly run an aggressive thaw to wipe the demo's
+    // residue off the persistent layer so the user starts on a fresh canvas.
+    let cleanupFrames = 0;
     function onFirstTouch() {
       if (firstTouched) return;
       firstTouched = true;
       hintEl.classList.add('is-gone');
       demoEl.classList.add('is-gone');
-      try { localStorage.setItem('frost-crystals:played', '1'); } catch (_) {}
+      cleanupFrames = 40; // ~0.66s at 60fps — fades demo residue to near-zero
       initAudio();
     }
-    try {
-      if (localStorage.getItem('frost-crystals:played')) {
-        hintEl.classList.add('is-gone');
-      }
-    } catch (_) {}
+    // The demo runs EVERY session (not gated by localStorage). On Aigram's
+    // TikTok-style list a user might scroll past dozens of games — they can't
+    // remember each one's interaction. A fresh tutorial + visual hook every
+    // time also doubles as an attractor when this game enters the viewport.
 
     // ─── Demo loop (Material touch_app finger) ───────────────────────────────
     const demo = { x: -9999, y: -9999, active: false, seed: null };
@@ -449,7 +452,6 @@
     async function runDemoLoop() {
       await new Promise(r => requestAnimationFrame(r));
       while (!firstTouched) {
-        if (localStorage.getItem('frost-crystals:played')) return;
         // Plant a phantom seed near center; let it grow as the finger arcs
         demo.seed = newSeed(W * 0.5, H * 0.5, -1);
         const cycleStart = performance.now();
@@ -646,12 +648,22 @@
         if (seed.active) stepSeed(seed, now, dtSec);
       }
 
-      // ─── Slow thaw: continuous fade keeps the persistent layer from saturating.
-      // During intro (firstTouched=false) we fade noticeably faster so the demo's
-      // ink doesn't pile up and bury the tutorial finger + hint after a few cycles.
+      // ─── Thaw: continuous fade keeps the persistent layer from saturating.
+      // Three modes — during intro (faster, so demo doesn't saturate), the
+      // 0.66s cleanup burst right after first touch (aggressive, wipes demo
+      // residue), and normal play (slow, lets user's work breathe).
+      let thawAlpha;
+      if (cleanupFrames > 0) {
+        cleanupFrames--;
+        thawAlpha = 0.88;        // ~0.6s window — kills demo residue to near-zero
+      } else if (!firstTouched) {
+        thawAlpha = 0.992;       // intro: brisk so demo doesn't pile up
+      } else {
+        thawAlpha = 0.9982;      // normal play
+      }
       px.save();
       px.globalCompositeOperation = 'destination-in';
-      px.fillStyle = firstTouched ? 'rgba(0,0,0,0.9982)' : 'rgba(0,0,0,0.992)';
+      px.fillStyle = `rgba(0,0,0,${thawAlpha})`;
       px.fillRect(0, 0, W, H);
       px.restore();
 

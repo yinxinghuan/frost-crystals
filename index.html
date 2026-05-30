@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="game-uuid" content="881877de-da56-4f0c-b3bb-70046e5daf70" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#04060d" />
+  <link rel="icon" type="image/gif" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" />
+  <title>Frost Crystals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,500&family=Inter:wght@400&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      -moz-user-select: none !important;
+      -ms-user-select: none !important;
+      user-select: none !important;
+      -webkit-user-drag: none;
+    }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: #04060d;
+      color: #fff;
+      overflow: hidden;
+      touch-action: none;
+      overscroll-behavior: none;
+      -webkit-text-size-adjust: 100%;
+    }
+    body { position: relative; }
+    canvas, img { -webkit-user-drag: none; -webkit-touch-callout: none; }
+
+    /* Two stacked canvases: persistent crystal record + live FX glow */
+    #pane {
+      position: absolute; inset: 0;
+      display: block; width: 100%; height: 100%;
+      background: radial-gradient(ellipse at 50% 35%, #0a1226 0%, #050810 60%, #02030a 100%);
+    }
+    #fx {
+      position: absolute; inset: 0;
+      display: block; width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 2;
+      mix-blend-mode: screen;
+    }
+
+    .wm {
+      position: absolute;
+      top: max(16px, env(safe-area-inset-top));
+      left: 18px;
+      width: 64px; height: auto;
+      opacity: 0.62;
+      pointer-events: none;
+      z-index: 4;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.55));
+    }
+
+    .title {
+      position: absolute;
+      top: max(20px, env(safe-area-inset-top));
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: "Cormorant Garamond", serif;
+      font-style: italic;
+      font-weight: 500;
+      font-size: 26px;
+      letter-spacing: 0.02em;
+      color: rgba(200, 224, 255, 0.78);
+      pointer-events: none;
+      z-index: 4;
+      text-shadow: 0 1px 7px rgba(150, 200, 255, 0.22);
+    }
+
+    .hint {
+      position: absolute;
+      left: 50%;
+      bottom: 14%;
+      transform: translateX(-50%);
+      font-family: "Inter", sans-serif;
+      font-weight: 400;
+      font-size: 12px;
+      letter-spacing: 0.34em;
+      text-transform: uppercase;
+      color: rgba(200, 224, 255, 0.55);
+      pointer-events: none;
+      z-index: 4;
+      animation: hint-pulse 2.4s ease-in-out infinite;
+      transition: opacity 1.4s ease;
+    }
+    .hint.is-gone { opacity: 0; }
+    @keyframes hint-pulse {
+      0%, 100% { opacity: 0.32; }
+      50%      { opacity: 0.74; }
+    }
+
+    .demo-finger {
+      position: absolute;
+      top: 0; left: 0;
+      width: 56px; height: 56px;
+      pointer-events: none;
+      z-index: 5;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+      will-change: transform, opacity;
+    }
+    .demo-finger.is-on { opacity: 0.92; }
+    .demo-finger.is-gone { opacity: 0 !important; transition: opacity 1.2s ease; }
+    .demo-finger svg {
+      width: 100%; height: 100%;
+      fill: rgba(200, 224, 255, 0.95);
+      filter:
+        drop-shadow(0 0 8px rgba(170, 210, 255, 0.55))
+        drop-shadow(0 0 18px rgba(100, 160, 230, 0.45))
+        drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+    }
+
+    .vignette {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      z-index: 3;
+      background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.5) 100%);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="pane"></canvas>
+  <canvas id="fx"></canvas>
+  <div class="vignette"></div>
+  <img class="wm" src="./alteru.svg" alt="AlterU" draggable="false" />
+  <div class="title">frost</div>
+  <div class="hint" id="hint">touch the glass</div>
+  <div class="demo-finger" id="demoFinger" aria-hidden="true">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.92-1.38z"/>
+    </svg>
+  </div>
+
+  <script>
+    // ─── Canvases ─────────────────────────────────────────────────────────────
+    // `pane` holds the persistent crystal record (lines accumulate, never cleared).
+    // `fx` is redrawn every frame for the live glowing tips + finger halo.
+    const pane = document.getElementById('pane');
+    const fx   = document.getElementById('fx');
+    const px   = pane.getContext('2d');
+    const fxc  = fx.getContext('2d');
+    const hintEl  = document.getElementById('hint');
+    const demoEl  = document.getElementById('demoFinger');
+
+    let W = 0, H = 0, DPR = 1;
+    function resize() {
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      // Preserve the persistent layer across resizes by snapshotting + redrawing
+      let snap = null;
+      try {
+        if (pane.width > 0 && pane.height > 0) {
+          snap = document.createElement('canvas');
+          snap.width = pane.width; snap.height = pane.height;
+          snap.getContext('2d').drawImage(pane, 0, 0);
+        }
+      } catch (_) {}
+      pane.width  = Math.floor(W * DPR);
+      pane.height = Math.floor(H * DPR);
+      pane.style.width = W + 'px'; pane.style.height = H + 'px';
+      fx.width    = Math.floor(W * DPR);
+      fx.height   = Math.floor(H * DPR);
+      fx.style.width = W + 'px'; fx.style.height = H + 'px';
+      px.setTransform(DPR, 0, 0, DPR, 0, 0);
+      fxc.setTransform(DPR, 0, 0, DPR, 0, 0);
+      // Restore previous record stretched to new size — fine for a sensory toy
+      if (snap) px.drawImage(snap, 0, 0, snap.width / DPR, snap.height / DPR);
+    }
+
+    // ─── Crystal data ─────────────────────────────────────────────────────────
+    // Each "seed" is a six-fold (12-fold mirror) snowflake rooted at one tap.
+    // A seed has a list of `tips` — the currently-growing endpoints. New segments
+    // extend from each tip and occasionally branch. When the finger that owns
+    // the seed releases, tips slowly fade out and stop growing.
+    //
+    // Persistent geometry is written to the `pane` canvas immediately; we don't
+    // store every drawn line in memory — only the live tips need to be tracked.
+    const seeds = [];        // active seeds being grown
+    const MAX_SEEDS = 12;    // cap to keep tip iteration cheap
+    // Per-frame queue of fresh segments — used by both the persistent draw AND
+    // the FX layer (so new growth glows briefly before settling).
+    const freshSegs = [];
+
+    // 6-fold rotation matrices precomputed once
+    const ROTS = [];
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      ROTS.push({ c: Math.cos(a), s: Math.sin(a) });
+    }
+
+    // Hex-palette per seed: tinted white through pale cyan/lavender/gold
+    const SEED_TINTS = [
+      [220, 240, 255], // ice white
+      [180, 222, 255], // pale cyan
+      [205, 200, 255], // lavender
+      [232, 218, 255], // orchid
+      [232, 240, 220], // pistachio
+      [255, 230, 200], // warm gold
+    ];
+
+    function newSeed(x, y, ownerPointerId) {
+      const tint = SEED_TINTS[(Math.random() * SEED_TINTS.length) | 0];
+      const seed = {
+        cx: x, cy: y,
+        owner: ownerPointerId, // null if it's a no-owner ambient seed
+        tint,
+        born: performance.now(),
+        // Single canonical branch direction we'll iterate; the 6-fold rotation
+        // is applied at render time so the seed is always symmetric.
+        // Start with three tip directions: straight ahead + ±30° splits
+        tips: [
+          { x: 0, y: 0, dir: Math.random() * 0.6 - 0.3, len: 0, life: 1.0 },
+        ],
+        age: 0,
+        active: true,
+      };
+      seeds.push(seed);
+      if (seeds.length > MAX_SEEDS) {
+        // Drop the oldest fully-locked seed; if all active, drop oldest active
+        let dropIdx = 0;
+        for (let i = 1; i < seeds.length - 1; i++) {
+          if (!seeds[i].active && seeds[dropIdx].active) { dropIdx = i; break; }
+        }
+        seeds.splice(dropIdx, 1);
+      }
+      return seed;
+    }
+
+    // ─── Pointer tracking ─────────────────────────────────────────────────────
+    // Each pointer either OWNS a fresh seed (planted on pointerdown) and steers
+    // its growth, OR steers an existing nearby seed.
+    const fingers = new Map(); // pointerId → { x, y, lastX, lastY, seedRef, t0, pathLen }
+
+    function pointFromEvent(e) {
+      const r = pane.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    pane.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      onFirstTouch();
+      const { x, y } = pointFromEvent(e);
+      // Plant a new seed at the tap location — unless a recent seed is very close
+      let seed = null;
+      const recent = seeds[seeds.length - 1];
+      if (recent && recent.active && Math.hypot(recent.cx - x, recent.cy - y) < 16) {
+        seed = recent; seed.owner = e.pointerId;
+      } else {
+        seed = newSeed(x, y, e.pointerId);
+        if (audioReady()) playPlant();
+      }
+      fingers.set(e.pointerId, {
+        x, y, lastX: x, lastY: y, seedRef: seed,
+        t0: performance.now(), pathLen: 0,
+      });
+      try { pane.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    pane.addEventListener('pointermove', (e) => {
+      const f = fingers.get(e.pointerId);
+      if (!f) return;
+      const { x, y } = pointFromEvent(e);
+      const dx = x - f.lastX, dy = y - f.lastY;
+      f.pathLen += Math.sqrt(dx * dx + dy * dy);
+      f.x = x; f.y = y;
+      f.lastX = x; f.lastY = y;
+    });
+    function endPointer(e) {
+      const f = fingers.get(e.pointerId);
+      if (!f) return;
+      // Release ownership; tips will die out naturally
+      if (f.seedRef && f.seedRef.owner === e.pointerId) {
+        f.seedRef.owner = null;
+        f.seedRef.releasedAt = performance.now();
+      }
+      fingers.delete(e.pointerId);
+      try { pane.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    pane.addEventListener('pointerup',     endPointer);
+    pane.addEventListener('pointercancel', endPointer);
+    pane.addEventListener('pointerleave',  endPointer);
+    pane.addEventListener('contextmenu',   (e) => e.preventDefault());
+
+    // ─── Audio ────────────────────────────────────────────────────────────────
+    // Per CLAUDE.md: ambient never starts on mount. First-touch only.
+    let actx = null, masterGain = null, droneBreathGain = null, noiseBuf = null;
+    let droneG1 = null, droneG2 = null;
+    let firstTouched = false;
+    let liveVoices = 0;
+    const MAX_VOICES = 16;
+
+    // Pentatonic scale, high register so tinkles read as crystalline.
+    const SCALE = [
+      784.0,  880.0,  987.8, 1174.7, 1318.5,  // G5 A5 B5 D6 E6
+      1568.0, 1760.0, 1975.5, 2349.3, 2637.0, // G6 A6 B6 D7 E7
+    ];
+    function pickNote(idx01) {
+      const idx = Math.min(SCALE.length - 1, Math.max(0, Math.floor(idx01 * SCALE.length)));
+      return SCALE[idx];
+    }
+
+    function initAudio() {
+      if (actx) return;
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        actx = new Ctx();
+        masterGain = actx.createGain();
+        masterGain.gain.value = 0.40;
+        masterGain.connect(actx.destination);
+
+        droneBreathGain = actx.createGain();
+        droneBreathGain.gain.value = 0.0001;
+        droneBreathGain.connect(masterGain);
+
+        // Two cold layers — a low pad + a higher fifth — feeding a high-Q
+        // bandpass to suggest wind in a frozen chamber.
+        const o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 84;
+        droneG1 = actx.createGain(); droneG1.gain.value = 1.0;
+        o1.connect(droneG1).connect(droneBreathGain); o1.start();
+        const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 126;
+        droneG2 = actx.createGain(); droneG2.gain.value = 0.32;
+        o2.connect(droneG2).connect(droneBreathGain); o2.start();
+
+        // Wind layer — filtered noise riding the breath envelope
+        const sr = actx.sampleRate;
+        noiseBuf = actx.createBuffer(1, Math.floor(sr * 0.5), sr);
+        const ch = noiseBuf.getChannelData(0);
+        for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+        // Loop a noise voice through a bandpass into the breath gain
+        const windSrc = actx.createBufferSource();
+        windSrc.buffer = noiseBuf; windSrc.loop = true;
+        const windBp = actx.createBiquadFilter();
+        windBp.type = 'bandpass'; windBp.frequency.value = 1800; windBp.Q.value = 0.7;
+        const windG = actx.createGain(); windG.gain.value = 0.08;
+        windSrc.connect(windBp).connect(windG).connect(droneBreathGain);
+        windSrc.start();
+
+        scheduleNextBreath();
+      } catch (e) { actx = null; }
+    }
+    function audioReady() {
+      return actx && actx.state === 'running' && liveVoices < MAX_VOICES;
+    }
+    function trackVoice(durMs) {
+      liveVoices++;
+      setTimeout(() => { liveVoices--; }, durMs + 30);
+    }
+    function scheduleNextBreath() {
+      if (!actx || !droneBreathGain) return;
+      const t0 = actx.currentTime;
+      const rise   = 5 + Math.random() * 3;
+      const hold   = 8 + Math.random() * 8;
+      const fall   = 6 + Math.random() * 4;
+      const silent = 7 + Math.random() * 9;
+      const peak   = 0.06 + Math.random() * 0.06;
+      const g = droneBreathGain.gain;
+      g.cancelScheduledValues(t0);
+      g.setValueAtTime(Math.max(g.value, 0.0001), t0);
+      g.exponentialRampToValueAtTime(peak,   t0 + rise);
+      g.setValueAtTime(peak,                 t0 + rise + hold);
+      g.exponentialRampToValueAtTime(0.0001, t0 + rise + hold + fall);
+      const total = rise + hold + fall + silent;
+      setTimeout(scheduleNextBreath, total * 1000);
+    }
+
+    // Crystalline tinkle per new branch — short FM bell
+    function playTinkle(idx01, vol) {
+      if (!audioReady()) return;
+      const freq = pickNote(idx01);
+      const t = actx.currentTime;
+      const o = actx.createOscillator();
+      const m = actx.createOscillator();
+      const mg = actx.createGain(); mg.gain.value = freq * 0.6;
+      const g = actx.createGain();
+      m.frequency.value = freq * 2.04;
+      m.connect(mg).connect(o.frequency);
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+      o.connect(g).connect(masterGain);
+      o.start(t); m.start(t);
+      o.stop(t + 0.6); m.stop(t + 0.6);
+      trackVoice(600);
+    }
+    // Deeper bell when a new seed is planted
+    function playPlant() {
+      if (!audioReady()) return;
+      const t = actx.currentTime;
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.type = 'sine'; o.frequency.value = 196; // G3
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.20, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+      o.connect(g).connect(masterGain);
+      o.start(t); o.stop(t + 1.3);
+      trackVoice(1300);
+    }
+    // Soft sigh on release — small filtered noise burst
+    function playRelease() {
+      if (!audioReady() || !noiseBuf) return;
+      const t = actx.currentTime;
+      const src = actx.createBufferSource(); src.buffer = noiseBuf;
+      const bp = actx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 1.2;
+      const g = actx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.04, t + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      src.connect(bp).connect(g).connect(masterGain);
+      src.start(t); src.stop(t + 0.5);
+      trackVoice(500);
+    }
+
+    function onFirstTouch() {
+      if (firstTouched) return;
+      firstTouched = true;
+      hintEl.classList.add('is-gone');
+      demoEl.classList.add('is-gone');
+      try { localStorage.setItem('frost-crystals:played', '1'); } catch (_) {}
+      initAudio();
+    }
+    try {
+      if (localStorage.getItem('frost-crystals:played')) {
+        hintEl.classList.add('is-gone');
+      }
+    } catch (_) {}
+
+    // ─── Demo loop (Material touch_app finger) ───────────────────────────────
+    const demo = { x: -9999, y: -9999, active: false, seed: null };
+    function placeDemoEl(x, y, on) {
+      demoEl.style.transform = `translate(${x - 28}px, ${y - 17}px)`;
+      demoEl.classList.toggle('is-on', on && !firstTouched);
+    }
+    async function runDemoLoop() {
+      await new Promise(r => requestAnimationFrame(r));
+      while (!firstTouched) {
+        if (localStorage.getItem('frost-crystals:played')) return;
+        // Plant a phantom seed near center; let it grow as the finger arcs
+        demo.seed = newSeed(W * 0.5, H * 0.5, -1);
+        const cycleStart = performance.now();
+        const dur = 4200;
+        while (!firstTouched) {
+          const t = (performance.now() - cycleStart) / dur;
+          if (t >= 1) break;
+          const e = 0.5 - 0.5 * Math.cos(t * Math.PI);
+          const x = W * 0.5 + Math.cos(e * Math.PI * 1.4) * W * 0.18;
+          const y = H * 0.5 + Math.sin(e * Math.PI * 1.4) * H * 0.10;
+          demo.x = x; demo.y = y; demo.active = true;
+          placeDemoEl(x, y, t > 0.04 && t < 0.96);
+          await new Promise(r => requestAnimationFrame(r));
+        }
+        // End cycle: release ownership of the demo seed so it locks
+        if (demo.seed) {
+          demo.seed.owner = null;
+          demo.seed.releasedAt = performance.now();
+          demo.seed = null;
+        }
+        demo.active = false;
+        placeDemoEl(-9999, -9999, false);
+        const pauseStart = performance.now();
+        while (!firstTouched && performance.now() - pauseStart < 700) {
+          await new Promise(r => requestAnimationFrame(r));
+        }
+      }
+      demo.active = false;
+      if (demo.seed) { demo.seed.owner = null; demo.seed.releasedAt = performance.now(); demo.seed = null; }
+    }
+    runDemoLoop();
+
+    // Debug hooks
+    window.__frost = {
+      seeds, fingers, get W(){ return W; }, get H(){ return H; },
+    };
+
+    // ─── Growth ───────────────────────────────────────────────────────────────
+    // Each tip extends each frame by SEGLEN px. With probability BRANCH_P it
+    // splits into two tips (current direction ±BRANCH_ANG). Old tips have
+    // `life` that decays once owner releases; when life <= 0 the tip is dead.
+    const SEGLEN   = 4.2;
+    const BRANCH_P = 0.06;
+    const BRANCH_ANG = Math.PI / 5;
+    const MAX_TIPS_PER_SEED = 28;
+    const MAX_REACH = 360; // px from seed center — keep flakes screen-sized
+
+    function tipGuide(seed, tip, fingerWorld) {
+      // If finger present + owner matches: bias growth toward the finger
+      // direction (in the seed's local frame, projected to its 6-fold "wedge"
+      // by always working in (r, theta) space relative to the seed center).
+      // For simplicity, snap finger angle into the [-30°, 30°] wedge so growth
+      // stays inside the symmetry triangle.
+      if (!fingerWorld) {
+        // Wander
+        return tip.dir + (Math.random() - 0.5) * 0.12;
+      }
+      const fx = fingerWorld.x - seed.cx;
+      const fy = fingerWorld.y - seed.cy;
+      // Tip in world coords (local rotated through some symmetry copy doesn't
+      // matter — finger steers the canonical branch). Use polar wedge:
+      const ang = Math.atan2(fy, fx);
+      // Wrap to nearest -PI/6..PI/6 window by mapping mod 60°
+      let wedge = ang;
+      // Shift so wedge centers are at i*60° → bring to (-30°, 30°)
+      wedge = ((wedge + Math.PI / 6) % (Math.PI / 3) + Math.PI / 3) % (Math.PI / 3) - Math.PI / 6;
+      // Mix wedge target with current dir for smooth steering
+      return tip.dir * 0.55 + wedge * 0.45 + (Math.random() - 0.5) * 0.08;
+    }
+
+    function stepSeed(seed, now, dtSec) {
+      seed.age += dtSec;
+      const ownerFinger = (seed.owner != null)
+        ? (seed.owner === -1 ? (demo.active ? demo : null) : fingers.get(seed.owner))
+        : null;
+      const fingerWorld = ownerFinger ? { x: ownerFinger.x, y: ownerFinger.y } : null;
+      // Growth speed — faster when owner is active
+      const growBudget = ownerFinger ? 1.0 : 0.0;
+      // Tip life decay once owner released
+      if (!ownerFinger && seed.releasedAt) {
+        const elapsed = (now - seed.releasedAt) / 1000;
+        const fade = Math.max(0, 1 - elapsed / 1.1);
+        for (const tip of seed.tips) tip.life = Math.min(tip.life, fade);
+      }
+      // Step each tip
+      const newTips = [];
+      for (let i = 0; i < seed.tips.length; i++) {
+        const tip = seed.tips[i];
+        if (tip.life <= 0.01 || tip.len > MAX_REACH) continue;
+        // Extend
+        const steerDir = tipGuide(seed, tip, fingerWorld);
+        const grow = growBudget * (0.7 + 0.6 * tip.life);
+        const stepN = grow > 0 ? 1 : 0;
+        for (let k = 0; k < stepN; k++) {
+          const ang = steerDir;
+          const dx = Math.cos(ang) * SEGLEN;
+          const dy = Math.sin(ang) * SEGLEN;
+          const from = { x: tip.x, y: tip.y };
+          tip.x += dx; tip.y += dy; tip.dir = ang; tip.len += SEGLEN;
+          // Record a fresh segment for drawing
+          freshSegs.push({
+            seed, from, to: { x: tip.x, y: tip.y }, life: tip.life,
+          });
+          // Crystalline tinkle, throttled by depth
+          if (Math.random() < 0.18) {
+            const norm = Math.min(1, tip.len / MAX_REACH);
+            playTinkle(1 - norm, 0.04 + 0.06 * tip.life);
+          }
+          // Branch
+          if (Math.random() < BRANCH_P && seed.tips.length + newTips.length < MAX_TIPS_PER_SEED) {
+            newTips.push({
+              x: tip.x, y: tip.y,
+              dir: ang + (Math.random() < 0.5 ? -1 : 1) * BRANCH_ANG,
+              len: tip.len,
+              life: tip.life * 0.96,
+            });
+          }
+        }
+      }
+      seed.tips.push(...newTips);
+      // Prune
+      seed.tips = seed.tips.filter(t => t.life > 0.01 && t.len <= MAX_REACH);
+      if (seed.tips.length === 0 && !ownerFinger) {
+        seed.active = false;
+      }
+    }
+
+    // ─── Drawing helpers (6-fold mirror) ──────────────────────────────────────
+    // Draw a single segment six times rotated around the seed center, and also
+    // reflect each across the wedge axis for full 12-fold snowflake symmetry.
+    function drawSegMirrored(ctx, seed, from, to, color, width) {
+      const cx = seed.cx, cy = seed.cy;
+      ctx.lineWidth = width;
+      ctx.strokeStyle = color;
+      ctx.lineCap = 'round';
+      const lx0 = from.x, ly0 = from.y;
+      const lx1 = to.x,   ly1 = to.y;
+      for (let i = 0; i < 6; i++) {
+        const { c, s } = ROTS[i];
+        // Rotation
+        const a0x = lx0 * c - ly0 * s, a0y = lx0 * s + ly0 * c;
+        const a1x = lx1 * c - ly1 * s, a1y = lx1 * s + ly1 * c;
+        ctx.beginPath();
+        ctx.moveTo(cx + a0x, cy + a0y);
+        ctx.lineTo(cx + a1x, cy + a1y);
+        ctx.stroke();
+        // Reflection across the seed's local x-axis (y → -y) — produces the
+        // mirror half of the snowflake's hexagon symmetry
+        ctx.beginPath();
+        ctx.moveTo(cx + a0x, cy - a0y);
+        ctx.lineTo(cx + a1x, cy - a1y);
+        ctx.stroke();
+      }
+    }
+
+    // ─── Main loop ────────────────────────────────────────────────────────────
+    let last = performance.now();
+
+    function step() {
+      const now = performance.now();
+      const dt  = Math.min(33, now - last); last = now;
+      const dtSec = dt / 1000;
+
+      // Update growth
+      freshSegs.length = 0;
+      for (const seed of seeds) {
+        if (seed.active) stepSeed(seed, now, dtSec);
+      }
+
+      // ─── Slow thaw: gently fade the persistent crystal layer so old work
+      // dissolves over minutes, making room for new gestures. Cheap one-pass.
+      px.save();
+      px.globalCompositeOperation = 'destination-in';
+      px.fillStyle = 'rgba(0,0,0,0.9994)';
+      px.fillRect(0, 0, W, H);
+      px.restore();
+
+      // ─── Persistent draw: ink in the fresh segments to the pane canvas ──
+      for (const seg of freshSegs) {
+        const t = seg.seed.tint;
+        // Soft underglow first, then a crisp white-ish core
+        drawSegMirrored(px, seg.seed, seg.from, seg.to,
+          `rgba(${t[0]},${t[1]},${t[2]},${0.16 + 0.18 * seg.life})`, 4.2);
+        drawSegMirrored(px, seg.seed, seg.from, seg.to,
+          `rgba(255,255,255,${0.65 * seg.life})`, 1.2);
+      }
+
+      // ─── FX layer: live tip halos + finger glow ─────────────────────────
+      fxc.clearRect(0, 0, W, H);
+      fxc.globalCompositeOperation = 'lighter';
+      for (const seed of seeds) {
+        if (!seed.active) continue;
+        const t = seed.tint;
+        for (const tip of seed.tips) {
+          if (tip.life <= 0.01) continue;
+          // Render the tip glow 6×2-fold for symmetry
+          const lx = tip.x, ly = tip.y;
+          const radius = 12 + 8 * tip.life;
+          for (let i = 0; i < 6; i++) {
+            const { c, s } = ROTS[i];
+            const ax = lx * c - ly * s;
+            const ay = lx * s + ly * c;
+            // Original side
+            const gA = fxc.createRadialGradient(seed.cx + ax, seed.cy + ay, 0, seed.cx + ax, seed.cy + ay, radius);
+            gA.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life})`);
+            gA.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life})`);
+            gA.addColorStop(1,   `rgba(${t[0]},${t[1]},${t[2]},0)`);
+            fxc.fillStyle = gA;
+            fxc.beginPath(); fxc.arc(seed.cx + ax, seed.cy + ay, radius, 0, Math.PI * 2); fxc.fill();
+            // Mirror side
+            const gB = fxc.createRadialGradient(seed.cx + ax, seed.cy - ay, 0, seed.cx + ax, seed.cy - ay, radius);
+            gB.addColorStop(0,   `rgba(255,255,255,${0.55 * tip.life})`);
+            gB.addColorStop(0.35,`rgba(${t[0]},${t[1]},${t[2]},${0.35 * tip.life})`);
+            gB.addColorStop(1,   `rgba(${t[0]},${t[1]},${t[2]},0)`);
+            fxc.fillStyle = gB;
+            fxc.beginPath(); fxc.arc(seed.cx + ax, seed.cy - ay, radius, 0, Math.PI * 2); fxc.fill();
+          }
+        }
+        // Seed center halo while owner is active
+        if (seed.owner != null) {
+          const haloR = 32 + 14 * Math.sin(now * 0.005);
+          const g = fxc.createRadialGradient(seed.cx, seed.cy, 0, seed.cx, seed.cy, haloR);
+          g.addColorStop(0, `rgba(${t[0]},${t[1]},${t[2]},0.32)`);
+          g.addColorStop(1, `rgba(${t[0]},${t[1]},${t[2]},0)`);
+          fxc.fillStyle = g;
+          fxc.beginPath(); fxc.arc(seed.cx, seed.cy, haloR, 0, Math.PI * 2); fxc.fill();
+        }
+      }
+      // Finger halos — additive ring around each real finger position
+      for (const f of fingers.values()) {
+        const g = fxc.createRadialGradient(f.x, f.y, 0, f.x, f.y, 26);
+        g.addColorStop(0,   'rgba(220,240,255,0.34)');
+        g.addColorStop(0.5, 'rgba(180,210,255,0.14)');
+        g.addColorStop(1,   'rgba(180,210,255,0)');
+        fxc.fillStyle = g;
+        fxc.beginPath(); fxc.arc(f.x, f.y, 26, 0, Math.PI * 2); fxc.fill();
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    resize();
+    window.addEventListener('resize', resize);
+    requestAnimationFrame(step);
+  </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
-_dev_*.png
+node_modules
+dist
+_*.py
 .DS_Store
-node_modules/
